@@ -95,6 +95,11 @@ fun vars :: "aexp ⇒ vname set" where
   "vars (V v) = {v}" |
   "vars (Plus e⇩1 e⇩2) = vars e⇩1 ∪ vars e⇩2"
 
+lemma finite_vars: "finite (vars e)"
+  apply(induction e)
+  apply(auto)
+  done
+
 (* Substitution *)
 
 fun substitute :: "vname ⇒ aexp ⇒ aexp ⇒ aexp" where
@@ -415,9 +420,12 @@ lemma subst_plus_subst_child:
   apply(auto)
   done
 
-(* Finding a neccessary improvement for the substitution *)
+lemma subst_subst': "substitute' (s@[(a, e')]) e = substitute a (substitute' s e) e'"
+  apply(induction s e rule: substitute'.induct)
+  apply(auto)
+  done
 
-definition "num_vars e = card (vars e)"
+(* Finding a neccessary improvement for the substitution *)
 
 datatype substitution = None | NonSubst | Subst vname aexp
 
@@ -507,7 +515,7 @@ proof(rule ccontr)
       by (metis aexp.distinct(5) find_substitution.simps(8) substitution.distinct(5) unifiable_def unifier_def v_in_e_not_unif) 
   next
     case (9 e⇩1 e⇩2 f⇩1 f⇩2)
-    then show ?case 
+    then show ?case
     proof(induction "find_substitution e⇩1 f⇩1" rule:substitution.induct)
       case None
       then show ?case using None.hyps None.prems(2) None.prems(4) subst_plus_subst_child unifier_def by auto 
@@ -534,11 +542,6 @@ lemma find_subst_le_vars: "find_substitution e⇩1 e⇩2 = Subst v t ⟹
   vars (substitute v e⇩1 t) ∪ vars (substitute v e⇩2 t) ⊂ vars e⇩1 ∪ vars e⇩2"
   by (metis find_subst_e_in_es find_subst_v_not_in_e find_subst_var_in_es substitute.simps(3) vars.simps(3) vars_subst_e_strict_sub_vars_e)
 
-lemma finite_vars: "finite (vars e)"
-  apply(induction e)
-  apply(auto)
-  done
-
 lemma card_vars_union_decr:
   "find_substitution e⇩1 e⇩2 = Subst v t ⟹ 
   card (vars (substitute v e⇩1 t) ∪ vars (substitute v e⇩2 t)) < card (vars e⇩1 ∪ vars e⇩2)"
@@ -552,11 +555,6 @@ proof-
   ultimately 
   show ?thesis using psubset_card_mono[of ?s⇩2 ?s⇩1] by blast 
 qed
-
-lemma subst_subst':"substitute' (s@[(a, e')]) e = substitute a (substitute' s e) e'"
-  apply(induction s e rule: substitute'.induct)
-  apply(auto)
-  done
 
 (* Unification of arithmetic expressions  *)
 
@@ -615,132 +613,47 @@ qed
 corollary unifiy'_unifies: "unify' s e⇩1 e⇩2 = Unif s' ⟹ unifier s' e⇩1 e⇩2"
   using unifier_def unify'_es_eq by blast
 
-lemma aux:"unify' [] e⇩1 e⇩2 = NonUnif ⟹ ¬unifiable e⇩1 e⇩2" 
+theorem unify_correct: "unify e⇩1 e⇩2 = Unif s ⟹ unifier s e⇩1 e⇩2"
+  by (metis unifiy'_unifies unify_def) 
+
+(* TODO *)
+lemma unify'_non_unif_invar_under_subst: 
+  "unify' [] e⇩1 e⇩2 = NonUnif ⟹ unify' [] (substitute v e⇩1 e) (substitute v e⇩2 e) = NonUnif" 
+  nitpick sorry
+
+lemma unify'_non_unif_no_unifier:
+  "unify' [] e⇩1 e⇩2 = NonUnif ⟹ ∄s. unifier s e⇩1 e⇩2" 
 proof(rule ccontr)
-  assume assm0:"unify' [] e⇩1 e⇩2 = NonUnif"
-  assume assm1:"¬¬unifiable e⇩1 e⇩2"
-  hence "unifiable e⇩1 e⇩2" by simp
-  hence "∃s. unifier s e⇩1 e⇩2" using unifier_eq_unifiable by blast 
-  then show False sorry
+  assume "unify' [] e⇩1 e⇩2 = NonUnif"
+  assume "¬(∄s. unifier s e⇩1 e⇩2)"
+  hence "∃s. unifier s e⇩1 e⇩2" by simp
+  from this obtain s where "unifier s e⇩1 e⇩2" by blast
+  have "unify' [] e⇩1 e⇩2 = NonUnif ⟹ unifier s e⇩1 e⇩2 ⟹ False"
+  proof(induction s arbitrary: e⇩1 e⇩2)
+    case Nil
+    then show ?case
+      by (simp add: unifier_def) 
+  next
+    case (Cons a s)
+    then show ?case
+      by (metis prod.exhaust_sel substitute'.simps(2) unifier_def unify'_non_unif_invar_under_subst) 
+  qed
+  then show False using ‹unifier s e⇩1 e⇩2› ‹unify' [] e⇩1 e⇩2 = NonUnif› by fastforce 
 qed
 
-lemma unifiable_impl_unif:"unifiable e⇩1 e⇩2 ⟹ (∃s. unify' [] e⇩1 e⇩2 = Unif s)"
-proof(rule ccontr)
-  assume assm0:"unifiable e⇩1 e⇩2"
-  assume assm1:"∄s. unify' [] e⇩1 e⇩2 = Unif s"
-  hence "∀s. unify' [] e⇩1 e⇩2 ≠ Unif s" by simp
-  hence "unify' [] e⇩1 e⇩2 = NonUnif" by (meson aexpUnif.exhaust)
-  then show False using assm0 aux by blast
-qed
+corollary unify'_correct': "unify' [] e⇩1 e⇩2 = NonUnif ⟹ ¬unifiable e⇩1 e⇩2"
+  using unify'_non_unif_no_unifier unifier_eq_unifiable by presburger
 
-theorem unifiable_correct: "unifiable e⇩1 e⇩2 ⟷ (∃s. unify e⇩1 e⇩2 = Unif s ∧ unifier s e⇩1 e⇩2)"
-  by (metis unifiable_impl_unif unifier_eq_unifiable unifiy'_unifies unify_def)
+corollary unify_correct': "unify e⇩1 e⇩2 = NonUnif ⟹ ¬unifiable e⇩1 e⇩2"
+  by (simp add: unify'_correct' unify_def) 
 
-corollary unifiable_correct': "¬unifiable e⇩1 e⇩2 ⟷ unify e⇩1 e⇩2 = NonUnif"
-  by (metis aexpUnif.exhaust aexpUnif.simps(3) unifiable_correct unifiy'_unifies unify_def) 
+lemma unify_complete: "unifiable e⇩1 e⇩2 ⟹ (∃s. unify' [] e⇩1 e⇩2 = Unif s)"
+  by (meson aexpUnif.exhaust unify'_correct') 
 
+theorem unify_complete_correct: "unifiable e⇩1 e⇩2 ⟷ (∃s. unify e⇩1 e⇩2 = Unif s ∧ unifier s e⇩1 e⇩2)"
+  by (metis unifier_eq_unifiable unifiy'_unifies unify_complete unify_def)
 
-
-
-
-
-
-
-
-(*
-
-function unify' :: "substitution ⇒ aexp ⇒ aexp ⇒ aexpUnif" where
-  "unify' s e⇩1 e⇩2 = (case (substitute' s e⇩1, substitute' s e⇩2) of
-    (s⇩1, s⇩2) ⇒ (if distance s⇩1 s⇩2 = 0 then Unif s else 
-      (case (s⇩1, s⇩2) of 
-        (N _, N _) ⇒ NonUnif |
-        (N n, V v) ⇒ unify' (s@[(v, N n)]) e⇩1 e⇩2 |
-        (N _, Plus _ _) ⇒ NonUnif |
-        (V v, N n) ⇒ unify' (s@[(v, N n)]) e⇩1 e⇩2 |
-        (V v⇩1, V v⇩2) ⇒ unify' (s@[(v⇩1, V v⇩2)]) e⇩1 e⇩2 |
-        (V v, Plus f⇩1 f⇩2) ⇒ unify' (s@[(v, Plus f⇩1 f⇩2)]) e⇩1 e⇩2 |
-        (Plus _ _, N _) ⇒ NonUnif |
-        (Plus f⇩1 f⇩2, V v) ⇒ unify' (s@[(v, Plus f⇩1 f⇩2)]) e⇩1 e⇩2 |
-        (Plus f⇩1 f⇩2, Plus g⇩1 g⇩2) ⇒ (case unify' s f⇩1 g⇩1 of
-          NonUnif ⇒ NonUnif |
-          Unif s' ⇒ (if s' ≠ [] then unify' (s@s') e⇩1 e⇩2 else
-          (case unify' s f⇩2 g⇩2 of 
-            NonUnif ⇒ NonUnif |
-            Unif s'' ⇒ unify' (s@s'') e⇩1 e⇩2
-          ))
-        )
-      ))
-  )"
-by pat_completeness auto
-termination 
-  apply(relation "measure (λ(s, e⇩1, e⇩2). distance (substitute' s e⇩1) (substitute' s e⇩2))")
-  apply(auto)
-  sorry
-
-definition "unify e⇩1 e⇩2 = unify' [] e⇩1 e⇩2"
-
-value "unify (V x) (N 3)"
-value "unify (Plus (V x) (N 3)) (Plus (N 3) (N 3))"
-value "unify (V x) (N 3)"
-value "unify (Plus (N 4) (N 3)) (Plus (N 3) (N 3))"
-value "unify (Plus (V ''x'') (N 3)) (Plus (V ''y'') (N 3))"
-value "unify (Plus (N 3) (N 3)) (Plus (V x) (N 3))"
-value "unify' [(''x'', N 3)] (N 3) (N 5)"
-value "unify (Plus (N 3) (N 4)) (Plus (V ''x'') (N 5))"
-value "unify (Plus (Plus (V ''y'') (N 3)) (N 4)) (Plus (V ''x'') (N 5))"
-
-*)
-
-
-(*
-function unify :: "aexp ⇒ aexp ⇒ aexpUnif" where
-  "unify (N n⇩1) (N n⇩2) = (if n⇩1 = n⇩2 then Unif [] else NonUnif)" |
-  "unify (N n) (V v) = Unif [(v, N n)]" |
-  "unify (N _) (Plus _ _) = NonUnif" |
-  "unify (V v) (N n) = Unif [(v, N n)]" |
-  "unify (V v⇩1) (V v⇩2) = Unif [(v⇩1, V v⇩2)]" |
-  "unify (V v) (Plus e⇩1 e⇩2) = Unif [(v, Plus e⇩1 e⇩2)]" |
-  "unify (Plus _ _) (N _) = NonUnif" |
-  "unify (Plus e⇩1 e⇩2) (V v) = Unif [(v, Plus e⇩1 e⇩2)]" |
-  "unify (Plus e⇩1 e⇩2) (Plus f⇩1 f⇩2) = (case unify e⇩1 f⇩1 of
-      NonUnif ⇒ NonUnif |
-      Unif s  ⇒ (case unify (substitute' s e⇩2) (substitute' s f⇩2) of
-          NonUnif ⇒ NonUnif |
-          Unif t  ⇒ Unif (s@t)
-      )
-  )"
-by pat_completeness auto
-termination apply(relation "measure (λ(e, f). num_vars e + num_vars f)")
-  apply(auto)
-
-value "unify (V ''x'') (Plus (N 3) (V ''y''))"
-*)
-
-(*
-datatype aexpUnif = NonUnif | UnifL aexp aexp | UnifN aexpUnif aexpUnif
-
-fun unify :: "aexp ⇒ aexp ⇒ aexpUnif" where
-  "unify (N n⇩1) (N n⇩2) = (if n⇩1 = n⇩2 then UnifL (N n⇩1) (N n⇩2) else NonUnif)" |
-  "unify (N n) (V v) = UnifL (N n) (V v)" |
-  "unify (N _) (Plus _ _) = NonUnif" |
-  "unify (V v) (N n) = UnifL (V v) (N n)" |
-  "unify (V v⇩1) (V v⇩2) = UnifL (V v⇩1) (V v⇩2)" |
-  "unify (V v) (Plus e⇩1 e⇩2) = UnifL (V v) (Plus e⇩1 e⇩2)" |
-  "unify (Plus _ _) (N _) = NonUnif" |
-  "unify (Plus e⇩1 e⇩2) (V v) = UnifL (Plus e⇩1 e⇩2) (V v)" |
-  "unify (Plus e⇩1 e⇩2) (Plus f⇩1 f⇩2) = (case (unify e⇩1 f⇩1, unify e⇩2 f⇩2) of
-      (NonUnif, _) ⇒ NonUnif |
-      (_, NonUnif) ⇒ NonUnif |
-      (u⇩1, u⇩2) ⇒ UnifN u⇩1 u⇩2
-  )"
-
-value "unify (N 5) (V ''x'')"
-value "unify (Plus (N 4) (Plus (N 3) (N 2))) (Plus (N 4) (V ''y''))"
-value "unify (Plus (N 4) (Plus (N 3) (N 2))) (Plus (N 3) (V ''y''))"
-*)
-
-(*
-definition "unifiable e⇩1 e⇩2 = (unify e⇩1 e⇩2 ≠ NonUnif)"
-*)
+corollary unify_complete_correct': "¬unifiable e⇩1 e⇩2 ⟷ unify e⇩1 e⇩2 = NonUnif"
+  by (metis aexpUnif.exhaust aexpUnif.simps(3) unify_complete_correct unifiy'_unifies unify_def) 
 
 end
